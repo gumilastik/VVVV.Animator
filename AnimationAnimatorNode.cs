@@ -1,4 +1,4 @@
-#region usings
+﻿#region usings
 using System;
 using System.ComponentModel.Composition;
 
@@ -12,7 +12,11 @@ using VVVV.Utils.SlimDX;
 using SlimDX;
 #endregion usings
 
+
 /*
+v1.9
+Fix start & repeat pins banging only when delay finished
+
 TODO:
 choose for freeze progress/time when delay/time changing
 */
@@ -410,10 +414,13 @@ curve[i].length += curve[i].percent[k] = VMath.Dist(Catmull(j , curve[i]), Catmu
 		
 		
 		
-		[Output("OnFinish", IsBang = true, Order = 9)]
+		[Output("OnFinishCycle", IsBang = true, Order = 9)]
+		public ISpread<bool> FOutFinishCycle;
+		
+		[Output("OnFinish", IsBang = true, Order = 10)]
 		public ISpread<bool> FOutFinish;
 		
-		[Output("OnFinishSpread", IsSingle = true, IsBang = true, Order = 10)]
+		[Output("OnFinishSpread", IsSingle = true, IsBang = true, Order = 11)]
 		public ISpread<bool> FOutFinishSpread;
 		
 		
@@ -434,6 +441,7 @@ curve[i].length += curve[i].percent[k] = VMath.Dist(Catmull(j , curve[i]), Catmu
 		private double[] percent;
 		private double[] prevPeriod;
 		private bool[] isStarted;
+		private bool[] isRepeated;
 		private int[] cycles;
 		
 		private bool isCompletedSpread;
@@ -479,6 +487,7 @@ curve[i].length += curve[i].percent[k] = VMath.Dist(Catmull(j , curve[i]), Catmu
 				FOutReversed.SliceCount = SpreadMax;
 				FOutRepeat.SliceCount = SpreadMax;
 				FOutRepeatCount.SliceCount = SpreadMax;
+				FOutFinishCycle.SliceCount = SpreadMax;
 				FOutFinish.SliceCount = SpreadMax;
 				FOutPercent.SliceCount = SpreadMax;
 				
@@ -486,6 +495,7 @@ curve[i].length += curve[i].percent[k] = VMath.Dist(Catmull(j , curve[i]), Catmu
 				Array.Resize(ref percent, SpreadMax);
 				Array.Resize(ref prevPeriod, SpreadMax);
 				Array.Resize(ref isStarted, SpreadMax);
+				Array.Resize(ref isRepeated, SpreadMax);
 				Array.Resize(ref cycles, SpreadMax);
 				
 				spreadMax = SpreadMax;
@@ -575,10 +585,11 @@ curve[i].length += curve[i].percent[k] = VMath.Dist(Catmull(j , curve[i]), Catmu
 				}
 				
 				if(FInStart[i] || FInStop[i])
-				{ 
+				{
 					isCompletedSpread = false;
 					
 					isStarted[i] = false;
+					isRepeated[i] = false;
 					cycles[i] = 0;
 					time[i] = 0;
 					
@@ -618,9 +629,13 @@ curve[i].length += curve[i].percent[k] = VMath.Dist(Catmull(j , curve[i]), Catmu
 				
 				FOutStart[i] = false;
 				FOutRepeat[i] = false;
+				FOutFinishCycle[i] = false;
 				FOutFinish[i] = false;
 				FOutDelaying[i] = false;
 				FOutReversed[i] = isReversed;
+				
+				
+				
 				
 				if((FOutRunning[i] && !FInPause[i]) || isParamChanged)
 				{
@@ -639,11 +654,19 @@ curve[i].length += curve[i].percent[k] = VMath.Dist(Catmull(j , curve[i]), Catmu
 						FOutput[i] = VMath.Clamp(VMath.Lerp(from, to,  t / FInTime[i] ), from, to);
 					}
 					
-					
-					if(time[i] >= 0 && isStarted[i] == false && FOutRunning[i]) // start bang
+					if(!FOutDelaying[i]) // bang only when there is no delay
 					{
-						isStarted[i] = true;
-						FOutStart[i] = true;
+						if(isRepeated[i])
+						{
+							FOutRepeat[i] = true;
+							FOutRepeatCount[i] = cycles[i];
+							isRepeated[i] = false;
+						}
+						if(time[i] >= 0 && isStarted[i] == false  ) // start bang
+						{
+							isStarted[i] = true;
+							FOutStart[i] = true;
+						}
 					}
 					
 					if(count >= 1)
@@ -674,9 +697,10 @@ if(isReversedNext != isReversed) FOutput[i] = VMath.Clamp(VMath.Lerp(to, from,  
 							
 							if(FOutRunning[i] && !FInPause[i])
 							{
-								FOutRepeat[i] = true;
-								FOutRepeatCount[i] = cycles[i];
+								isRepeated[i] = true;
+								FOutFinishCycle[i] = true;
 							}
+							
 						}
 						else
 						{
